@@ -1,0 +1,22 @@
+---
+title: "Nobel Prize Laureate Data Analysis"
+author: "Pascal Hermann Kouogang Tafo"
+format: html
+editor: visual
+---
+
+## INTRODUCTION
+
+The Nobel Prize dataset constitutes a uniquely comprehensive register of high-impact scientific and humanistic contribution spanning more than a century. This assignment outlines a data-driven investigation into the Nobel Prize dataset using a systematic API-to-Tidyverse workflow.
+
+## APPROACH
+
+To resolve this Nobel Prize organization task, we will do as followed:
+
+-   **Data Acquisition:** we will use GET requests to pull the laureate and nobel Prize endpoints.
+
+-   Utilize **jsonlite** with flatten = TRUE and handle list-columns created by laureates who have won multiple prizes.
+
+-   We will transform the Data by **joining** laureate biographical data with prize data to create a master data frame.
+
+-   We will perform analysis, where we will **Execute** four targeted queries, including at least one multi-variate join against the master data frame.
