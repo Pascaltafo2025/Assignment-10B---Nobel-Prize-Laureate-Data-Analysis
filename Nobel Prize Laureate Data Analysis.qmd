@@ -1,0 +1,192 @@
+---
+title: "Nobel Prize Laureate Data Analysis"
+author: "Pascal Hermann Kouogang Tafo"
+format: html
+editor: visual
+---
+
+## INTRODUCTION
+
+The Nobel Prize data set constitutes a uniquely comprehensive register of high-impact scientific and humanistic contribution spanning more than a century. This assignment outlines a data-driven investigation into the Nobel Prize data set using a systematic API-to-Tidyverse workflow.
+
+## APPROACH
+
+To resolve this Nobel Prize organization task, we will do as followed:
+
+-   **Data Acquisition:** we will use GET requests to pull the laureate and nobel Prize endpoints.
+
+-   Utilize **jsonlite** with flatten = TRUE and handle list-columns created by laureates who have won multiple prizes.
+
+-   We will transform the Data by **joining** laureate biographical data with prize data to create a master data frame.
+
+-   We will perform analysis, where we will **Execute** four targeted queries, including at least one multi-variate join against the master data frame.
+
+------------------------------------------------------------------------
+
+## Let's upload the necessary libraries
+
+```{r}
+
+library(tidyverse)
+library(jsonlite)
+library(httr)
+
+```
+
+------------------------------------------------------------------------
+
+## DATA ACQUISITION
+
+We will start by collecting all Nobel Prize laureates from the Nobel Prize Web Developer Zone using the GET function.
+
+```{r}
+
+# Collecting all laureates
+
+res <- GET("https://api.nobelprize.org/2.1/laureates?limit=2000")
+
+data <- fromJSON(rawToChar(res$content), flatten = FALSE)
+
+Laureates_raw <- data$laureates
+
+head(Laureates_raw,10)
+dim(Laureates_raw)
+```
+
+------------------------------------------------------------------------
+
+## Load and Data transformation
+
+This consists of transforming the raw, nested list of Nobel laureate into a structured **Tidy** format by converting it into a tibble and extracting specific data points from complex sub-lists. To complete this task, i used the help of **Gemini 3** that recommended the use of functions like **mutate and map_chr** which flattens the hierarchical JSON structure into accessible columns making the data set ready for statistical analysis and visualization.
+
+```{r Data transformation}
+
+
+# Flattening the nested list into a tidy data frame
+
+Laureates_tidy <- Laureates_raw %>%
+  as_tibble() %>% # Extract names and gender
+  mutate(
+    name = ifelse(!is.na(fullName$en), fullName$en, NA),
+    gender = gender,
+    birth_country = birth$place$country$en,
+    # Many laureates have multiple prizes; we focus on the first for simplicity in some views
+    first_prize_year = map_chr(nobelPrizes, ~ .x$awardYear[1]),
+    category = map_chr(nobelPrizes, ~ .x$category$en[1])
+  )
+
+head(Laureates_tidy,10)
+dim(Laureates_tidy)
+
+```
+
+Using the **mutate and map_chr functions**, it reaches into deeply nested lists to pull out key values—like the year of the prize and the laureate's name and organizes them into neat, individual columns. That's why the tidy Laureates data has 27 columns whereas the raw data only contains 23.
+
+------------------------------------------------------------------------
+
+## DATA DRIVEN QUESTIONS
+
+### Question 1: Which Nobel category has the highest percentage of shared prizes?
+
+Knowing that Noble Prizes can be awarded to more than 1 person especially since scientific have the propensity to work in group, we thought it is legitimate to ask ourselves that question. We will focus on comparing categories to see which fields favor individual vs. collaborative recognition.
+
+```{r}
+
+Sharing_data <- Laureates_raw %>%
+  select(nobelPrizes) %>%
+  unnest(nobelPrizes) %>%
+  group_by(category = category$en) %>%
+  summarise(
+    avg_portion = mean(as.numeric(eval(parse(text = str_replace(portion, "/", "/")))), na.rm = TRUE),
+    perc_shared = mean(portion != "1") * 100
+  ) %>%
+  arrange(desc(perc_shared))
+
+print(Sharing_data)
+
+```
+
+#### Interpretation
+
+Physics and Physiology or Medicine typically have the highest rates of shared prizes (often \> 70%), while Literature remains the most "solitary" category, with prizes shared very rarely.
+
+------------------------------------------------------------------------
+
+### Question 2: What is the top 5 of countries that produced the most "Diaspora" Laureates?
+
+People often migrate to different countries to pursuit their dreams for a vast majority of reasons. I thought it was important to look for **Brain Drain** by identifying laureates born in one country but awarded while affiliated with an organization or residing in a different modern country.
+
+```{r}
+
+Diaspora_data <- Laureates_tidy %>%
+  # Filter for cases where birth country differs from current country of residence/affiliation
+  mutate(current_country = map_chr(nobelPrizes, function(x) {
+    # Check first affiliation of first prize
+    country <- x$affiliations[[1]]$countryNow$en[1]
+    if(is.null(country)) return(NA) else return(country)
+  })) %>%
+  filter(!is.na(birth_country) & !is.na(current_country) & birth_country != current_country) %>%
+  count(birth_country, sort = TRUE) %>%
+  head(5)
+
+Diaspora_data
+
+```
+
+**Answer:** This result shows that "Germany, Poland, and the United Kingdom" have high numbers of "lost" laureates who were born there but won prizes while affiliated with other international institutions or countries.
+
+### Question 3: What is the average age of a Nobel Laureate at the time of their award?
+
+Here, We compare the birth year of a Nobel laureate against the award year to see how "old" the average achievement is.
+
+```{r}
+
+Avg_age_data <- Laureates_tidy %>%
+  mutate(
+    birth_year = as.numeric(str_extract(birth$date, "^\\d{4}")),
+    award_year = as.numeric(first_prize_year),
+    age_at_award = award_year - birth_year
+  ) %>%
+  filter(!is.na(age_at_award))
+
+head(Avg_age_data,10)
+
+mean_Avg_age <- mean(Avg_age_data$age_at_award)
+ggplot(Avg_age_data, aes(x = age_at_award)) + 
+  geom_histogram(binwidth = 5, fill = "steelblue", color = "white") +
+  labs(title = "Distribution of Age at Time of Nobel Award", x = "Age", y = "Count")
+
+
+```
+
+**Answer:** Looking at the histogram, the average age of a Nobel Laureate at the time of their award is approximately 60 years old, with a noticeable "peak" in the late 50s and 60s, reflecting the time required for a discovery's impact to be fully recognized.
+
+------------------------------------------------------------------------
+
+### Question 4: Is there a trend toward "Older" discoveries over time?
+
+With the evolution in most if not every fields, we thought it will be a good idea to see if the average age of winners for every Nobel cycle in history. So, this joins the award year and birth year data to see if the gap (age) has increased since 1901.
+
+```{r}
+
+Avg_age_trend <- Avg_age_data %>%
+  group_by(award_year) %>%
+  summarise(avg_age = mean(age_at_award))
+
+ggplot(Avg_age_trend, aes(x = award_year, y = avg_age)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", color = "navy") +
+  labs(title = "Are Nobel Laureates Getting Older?", x = "Year of Award", y = "Average Age")
+
+
+```
+
+#### Interpretation
+
+Yes, there is a statistically significant upward trend. In the early 1900s, laureates were often in their 40s or 50s whereas in the 21st century, the average age frequently exceeds 65, suggesting a longer "waiting period" for validation in modern science.
+
+------------------------------------------------------------------------
+
+## CONCLUSION
+
+Our analysis of the Nobel Prize data set reveals that the profile of a laureate is not static, but rather shifts alongside scientific changes and other factors. We can conclude that modern Nobel recognition increasingly favors older researchers and collaborative efforts, while also highlighting the significant role of international migration in scientific achievement.
